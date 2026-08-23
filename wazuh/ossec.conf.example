@@ -287,7 +287,7 @@
     <name>wazuh</name>
     <node_name>node01</node_name>
     <node_type>master</node_type>
-    <key>aa093264ef885029653eea20dfcf51ae</key>
+    <key>REPLACE_WITH_YOUR_CLUSTER_KEY</key>
     <port>1516</port>
     <bind_addr>0.0.0.0</bind_addr>
     <nodes>

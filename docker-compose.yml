@@ -1,0 +1,94 @@
+# TheHive 5 + Cortex + Cassandra + Elasticsearch stack.
+# Reconstructed from the actual running containers (this stack was originally
+# started via individual `docker run` commands rather than a saved compose
+# file, so this is a faithful reproduction of that observed configuration).
+#
+# Run alongside the separate Wazuh stack (wazuh/docker-compose.yml).
+# The two stacks need to be on a shared Docker network for the
+# custom-w2thive / custom-telegram integrations to reach TheHive/Cortex by
+# hostname — see README for the network bridging step.
+
+version: "3.8"
+
+services:
+  elasticsearch:
+    image: docker.elastic.co/elasticsearch/elasticsearch:7.17.13
+    container_name: thehive-elasticsearch
+    environment:
+      - xpack.security.enabled=false
+      - discovery.type=single-node
+      - ES_JAVA_OPTS=-Xms512m -Xmx512m
+    volumes:
+      - es_data:/usr/share/elasticsearch/data
+    networks:
+      - thehive-net
+
+  cassandra:
+    image: cassandra:4.1
+    container_name: thehive-cassandra
+    environment:
+      - CASSANDRA_CLUSTER_NAME=thehive-cluster
+      - MAX_HEAP_SIZE=512M
+      - HEAP_NEWSIZE=100M
+    volumes:
+      - cassandra_data:/var/lib/cassandra
+    networks:
+      - thehive-net
+
+  cortex:
+    # Built from the official Cortex-Analyzers repo per this project's setup.
+    # If you don't already have a local Cortex image, use TheHive-Project's
+    # official cortex image instead: image: thehiveproject/cortex:3.1.7-1
+    image: thehive-cortex-cortex
+    container_name: cortex
+    depends_on:
+      - elasticsearch
+    ports:
+      - "9001:9001"
+    volumes:
+      - ./Cortex-Analyzers:/opt/Cortex-Analyzers
+      - cortex_data:/opt/cortex/data
+      - cortex_jobs:/tmp/cortex-jobs
+      - ./cortex/application.conf:/etc/cortex/application.conf
+      # Gives Cortex responders (e.g. this project's docker/host-level
+      # actions) access to the Docker socket. Omit if your responders don't
+      # need it.
+      - /var/run/docker.sock:/var/run/docker.sock
+    networks:
+      - thehive-net
+
+  thehive:
+    image: strangebee/thehive:5.2
+    container_name: thehive
+    depends_on:
+      - cassandra
+      - elasticsearch
+      - cortex
+    ports:
+      - "9000:9000"
+    volumes:
+      - thehive_data:/opt/thp/thehive/files
+    command:
+      - --cql-hostnames
+      - cassandra
+      - --index-backend
+      - elasticsearch
+      - --es-hostnames
+      - elasticsearch
+      - --cortex-hostnames
+      - cortex
+      - --cortex-port
+      - "9001"
+    networks:
+      - thehive-net
+
+networks:
+  thehive-net:
+    driver: bridge
+
+volumes:
+  es_data:
+  cassandra_data:
+  cortex_data:
+  cortex_jobs:
+  thehive_data:
