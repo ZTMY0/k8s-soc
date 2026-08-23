@@ -1,0 +1,13 @@
+# Secrets — never commit
+.env
+*.env
+k3s-kubeconfig.yaml
+kubeconfig*
+*.pem
+*.key
+
+# OS / editor junk
+.DS_Store
+__pycache__/
+*.pyc
+.vscode/

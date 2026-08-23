@@ -1,0 +1,24 @@
+{
+  "name": "K8sIsolate",
+  "version": "1.0",
+  "author": "Ihab",
+  "url": "https://github.com/TheHive-Project/Cortex-Analyzers",
+  "license": "AGPL-V3",
+  "description": "Isolates a Kubernetes pod from the network via NetworkPolicy, without deleting it",
+  "dataTypeList": ["thehive:case_artifact"],
+  "command": "K8sIsolate/k8sisolate.py",
+  "baseConfig": "K8sIsolate",
+  "config": {
+    "namespace": "default"
+  },
+  "configurationItems": [
+    {
+      "name": "namespace",
+      "description": "Kubernetes namespace of the pod to isolate",
+      "type": "string",
+      "multi": false,
+      "required": true,
+      "defaultValue": "default"
+    }
+  ]
+}

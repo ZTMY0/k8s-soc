@@ -1,0 +1,12 @@
+{
+  "name": "IPBlock",
+  "version": "1.0",
+  "author": "Ihab",
+  "url": "https://github.com/local/custom-responders",
+  "license": "AGPL-V3",
+  "description": "Blocks a malicious source IP via an iptables DROP rule",
+  "dataTypeList": ["thehive:case_artifact"],
+  "command": "IPBlock/ipblock.py",
+  "baseConfig": "IPBlock",
+  "config": {}
+}

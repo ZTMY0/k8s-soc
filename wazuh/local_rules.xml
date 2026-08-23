@@ -1,0 +1,171 @@
+<!-- Local rules -->
+<!-- Modify it at your will. -->
+<!-- Copyright (C) 2015, Wazuh Inc. -->
+<!-- Example -->
+<group name="local,syslog,sshd,">
+  <!--
+  Dec 10 01:02:02 host sshd[1234]: Failed none for root from 1.1.1.1 port 1066 ssh2
+  -->
+  <rule id="100001" level="5">
+    <if_sid>5716</if_sid>
+    <srcip>1.1.1.1</srcip>
+    <description>sshd: authentication failed from IP 1.1.1.1.</description>
+    <group>authentication_failed,pci_dss_10.2.4,pci_dss_10.2.5,</group>
+  </rule>
+</group>
+
+<!-- Kerberoasting detection -->
+<group name="windows,windows_security,kerberos,">
+
+  <!-- Base rule: every Kerberos service ticket request (TGS) -->
+  <rule id="100100" level="3">
+    <decoded_as>windows_eventchannel</decoded_as>
+    <field name="win.system.eventID">^4769$</field>
+    <description>Windows: Kerberos service ticket (TGS) requested for $(win.eventdata.serviceName)</description>
+    <group>kerberos_ticket,</group>
+  </rule>
+
+  <!-- Escalation: RC4 (etype 0x17) TGS request -> possible Kerberoasting -->
+  <rule id="100101" level="12">
+    <if_sid>100100</if_sid>
+    <field name="win.eventdata.ticketEncryptionType">^0x17$</field>
+    <field name="win.eventdata.serviceName" negate="yes">^krbtgt$</field>
+    <field name="win.eventdata.targetUserName" negate="yes">\$@</field>
+    <description>Possible Kerberoasting: RC4-encrypted TGS ticket requested by $(win.eventdata.targetUserName) for service $(win.eventdata.serviceName)</description>
+    <mitre>
+      <id>T1558.003</id>
+    </mitre>
+    <group>kerberoasting,attack,</group>
+  </rule>
+  <rule id="100102" level="10" frequency="8" timeframe="60">
+    <if_matched_sid>100100</if_matched_sid>
+    <same_field>win.eventdata.targetUserName</same_field>
+    <description>Possible ticket enumeration/abuse: $(win.eventdata.targetUserName) requested 8+ Kerberos tickets within 60s</description>
+    <mitre>
+      <id>T1558</id>
+    </mitre>
+    <group>kerberos_enumeration,anomaly,</group>
+  </rule>
+
+</group>
+<!-- Privileged/high-value account logon monitoring -->
+<group name="local,windows,privileged_account_monitoring,">
+  <rule id="100103" level="12">
+    <if_sid>92652</if_sid>
+    <field name="win.eventdata.targetUserName">^RR$|^svc_backup$|^admin\.chu$</field>
+    <description>High-severity: Successful NTLM logon to a known sensitive/high-value account ($(win.eventdata.targetUserName)) - verify this is expected</description>
+    <mitre>
+      <id>T1078</id>
+    </mitre>
+    <group>privileged_logon,attack,</group>
+<ignore>300</ignore>
+  </rule>
+</group>
+<!-- Compromise chain detection: RR/svc_backup/admin.chu creating backdoor accounts -->
+<group name="local,windows,attack,compromise_chain,">
+  <rule id="100104" level="13">
+    <if_sid>60109</if_sid>
+    <field name="win.eventdata.subjectUserName">^RR$|^svc_backup$|^admin\.chu$</field>
+    <description>Critical: New account '$(win.eventdata.targetUserName)' created by compromised account $(win.eventdata.subjectUserName) - likely persistence backdoor</description>
+    <mitre>
+      <id>T1136.001</id>
+      <id>T1098</id>
+    </mitre>
+    <group>persistence,attack,privileged_account_abuse,</group>
+  </rule>
+
+  <rule id="100105" level="14">
+    <if_sid>60154</if_sid>
+    <field name="win.eventdata.subjectUserName">^RR$|^svc_backup$|^admin\.chu$</field>
+    <description>Critical: $(win.eventdata.subjectUserName) (compromised account) added a member to the Administrators group - privilege escalation in progress</description>
+    <mitre>
+      <id>T1484</id>
+      <id>T1098.002</id>
+    </mitre>
+    <group>privilege_escalation,attack,privileged_account_abuse,</group>
+  </rule>
+
+  <rule id="100106" level="15" frequency="2" timeframe="300">
+    <if_matched_sid>100104</if_matched_sid>
+    <if_sid>100105</if_sid>
+    <same_field>win.eventdata.subjectUserName</same_field>
+    <description>CONFIRMED DOMAIN COMPROMISE CHAIN: $(win.eventdata.subjectUserName) created a backdoor account and escalated it to Domain Admins-equivalent within 5 minutes</description>
+    <mitre>
+      <id>T1136.001</id>
+      <id>T1098</id>
+      <id>T1484</id>
+    </mitre>
+    <group>attack,confirmed_compromise,critical,</group>
+  </rule>
+</group>
+<!-- Falco / Kubernetes runtime detection -->
+<group name="falco,kubernetes,">
+  <rule id="100200" level="3">
+    <decoded_as>json</decoded_as>
+
+    <field name="rule" type="pcre2">.+</field>
+    <description>Falco: $(data.rule)</description>
+    <options>no_full_log</options>
+  </rule>
+
+  <rule id="100201" level="7">
+    <if_sid>100200</if_sid>
+    <field name="priority">Warning</field>
+    <description>Falco Warning: $(data.rule) on $(data.output_fields.k8s.pod.name)</description>
+    <group>falco_warning,</group>
+  </rule>
+
+  <rule id="100202" level="12">
+    <if_sid>100200</if_sid>
+    <field name="priority">Critical|Emergency|Alert</field>
+    <description>Falco CRITICAL: $(data.rule) on $(data.output_fields.k8s.pod.name)</description>
+    <group>falco_critical,</group>
+  </rule>
+
+  <!-- Severity revised from level 10 to 13 and tagged confirmed_compromise
+       to achieve parity with the Windows-side compromise-chain detection
+       (rule 100106) and enable automatic case promotion in TheHive. -->
+  <rule id="100203" level="13">
+    <if_sid>100200</if_sid>
+    <field name="rule">Terminal shell in container</field>
+    <description>Falco: Shell spawned in container $(data.output_fields.k8s.pod.name) - possible container escape/compromise</description>
+    <group>falco_shell,mitre_execution,attack,confirmed_compromise,critical,</group>
+  </rule>
+  <rule id="100204" level="13">
+    <if_sid>100200</if_sid>
+    <field name="rule">Redirect stdout/stdin to network connection</field>
+    <description>Falco: Reverse shell detected in container $(data.output_fields.k8s.pod.name) - stdin/stdout redirected to network</description>
+    <group>falco_shell,mitre_execution,attack,confirmed_compromise,critical,</group>
+  </rule>
+  <rule id="100205" level="13">
+    <if_sid>100200</if_sid>
+    <field name="rule">Contact K8S API Server From Container</field>
+    <description>Falco: Container $(data.output_fields.k8s.pod.name) contacted K8s API server - possible ServiceAccount token abuse</description>
+    <group>falco_k8s_api,mitre_discovery,attack,confirmed_compromise,critical,</group>
+  </rule>
+</group>
+
+<!-- CHU Portal: stored XSS detection on announcements board -->
+<group name="chu-portal,web,attack,">
+  <rule id="100206" level="5">
+    <if_group>syslog</if_group>
+    <match>event="announcement_posted"</match>
+    <description>CHU Portal: announcement posted (baseline)</description>
+  </rule>
+
+  <rule id="100207" level="13">
+    <if_sid>100206</if_sid>
+    <regex type="pcre2">(?i)(\x3cscript|onerror\s*=|onload\s*=|javascript:|\x3cimg\s|\x3csvg\s|document\.cookie)</regex>
+    <description>Possible stored XSS payload submitted via CHU staff portal announcements</description>
+    <mitre>
+      <id>T1059.007</id>
+    </mitre>
+    <group>xss,confirmed_compromise,critical,</group>
+  </rule>
+</group>
+<group name="vulnerability-detector,">
+  <rule id="100300" level="4">
+    <if_group>vulnerability-detector</if_group>
+    <description>Vulnerability scan finding (informational, downgraded from noisy CVE feed)</description>
+  </rule>
+</group>
